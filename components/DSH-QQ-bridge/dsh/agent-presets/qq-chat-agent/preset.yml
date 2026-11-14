@@ -1,0 +1,3 @@
+name: QQ 管理员 Agent（二代仿真）
+description: 二代仿真 + 管理员 Agent 模式（reserved2-agent）专用：仅管理员私聊会挂载完整本地工具，其余会话仍走 qq-chat-v2 的安全工具面。
+order: 12

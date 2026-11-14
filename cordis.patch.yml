@@ -1,0 +1,6 @@
+# DSMP (DeepSeek-memory-partner): memory engine + desktop chat panel in one plugin.
+# Host half: /api/dsmp/* routes and the vendored memory engine.
+# Client half: a sidebar panellist entry plus its keyed main page.
+- insert:
+    - id: dsmp
+      name: '@local/dsmp'

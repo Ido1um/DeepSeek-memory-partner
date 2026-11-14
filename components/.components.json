@@ -1,0 +1,6 @@
+{
+  "layout": "portable",
+  "bridge": "components/DSH-QQ-bridge",
+  "snowluma": "components/SnowLuma (zip only; code+node.exe, no account data)",
+  "note": "Portable QQ bridge; zip additionally bundles SnowLuma 1.14.20 without account data, state, logs or tokens. See components/README.md."
+}

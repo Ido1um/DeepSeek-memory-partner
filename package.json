@@ -1,0 +1,70 @@
+{
+  "name": "@local/dsmp",
+  "version": "2.0.3",
+  "private": true,
+  "description": "DeepSeek-memory-partner: memory engine + desktop chat panel in one DSH plugin",
+  "license": "MIT",
+  "author": "Ido1um",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ido1um/DeepSeek-memory-partner.git"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "memory",
+    "agent",
+    "qq",
+    "desktop"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "vendor/memory/",
+    "workbench/server.mjs",
+    "workbench/public/",
+    "workbench/icon.ico",
+    "workbench/open.mjs",
+    "workbench/open.vbs",
+    "workbench/start.cmd",
+    "workbench/stop.cmd",
+    "workbench/stop.ps1",
+    "workbench/README.md",
+    "scripts/",
+    "test/",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.1-rc.2"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  }
+}

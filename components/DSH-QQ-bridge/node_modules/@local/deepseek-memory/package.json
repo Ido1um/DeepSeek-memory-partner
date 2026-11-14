@@ -1,0 +1,52 @@
+{
+  "name": "@local/deepseek-memory",
+  "version": "3.1.3",
+  "private": true,
+  "type": "module",
+  "description": "7 天滚动记忆：日志/归档/检索 + 模型交接摘要与长期事实卡 + MCP 检索工具。可被 qq-bridge 或其他程序以本地包方式引用。",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "main": "src/store.mjs",
+  "exports": {
+    ".": "./src/store.mjs",
+    "./digest": "./src/digest.mjs",
+    "./config": "./src/config.mjs",
+    "./migrate": "./src/migrate.mjs",
+    "./engine": "./src/engine.mjs",
+    "./window": "./src/window.mjs",
+    "./host": "./src/host.mjs",
+    "./score": "./src/score.mjs",
+    "./facts": "./src/facts.mjs",
+    "./longterm": "./src/longterm.mjs",
+    "./scoring": "./src/scoring-runner.mjs",
+    "./due": "./src/due.mjs",
+    "./episode": "./src/episode.mjs",
+    "./episode-ai": "./src/episode-ai.mjs",
+    "./self-write": "./src/self-write.mjs",
+    "./media": "./src/media.mjs",
+    "./schedule": "./src/schedule.mjs",
+    "./route": "./src/route.mjs",
+    "./recall-format": "./src/recall-format.mjs",
+    "./claims": "./src/claims.mjs",
+    "./revise": "./src/revise.mjs",
+    "./tasks": "./src/tasks.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "test:all": "node --test",
+    "test:engine": "node --test test/engine.test.mjs",
+    "test:score": "node --test test/score.test.mjs",
+    "test:scoring": "node --test test/scoring.test.mjs",
+    "test:due": "node --test test/due.test.mjs",
+    "test:digest": "node --test test/digest.test.mjs",
+    "test:reminder": "node --test test/reminder.test.mjs",
+    "mcp": "node src/mcp-server.mjs",
+    "audit:facts": "node scripts/audit-facts.mjs",
+    "scan:secrets": "node scripts/scan-secrets.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  }
+}

@@ -1,0 +1,12 @@
+# runtime / build artifacts (never commit)
+/node_modules/
+dist/
+logs/
+*.tgz
+*.zip
+workbench/config.json
+workbench/.workbench-token
+# SnowLuma is not distributed any more; keep only its adaptation guide
+components/SnowLuma/
+.DS_Store
+Thumbs.db
