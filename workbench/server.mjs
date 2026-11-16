@@ -26,6 +26,7 @@ import * as mediaMod from '../vendor/memory/src/media.mjs';
 import * as claimsMod from '../vendor/memory/src/claims.mjs';
 import * as reviseMod from '../vendor/memory/src/revise.mjs';
 import { auditPresets } from '../vendor/memory/src/preset-audit.mjs';
+import { withWriteLease } from '../lib/lease.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(HERE, 'public');
@@ -1250,6 +1251,17 @@ const send = (res, code, body, type = 'application/json; charset=utf-8') => {
   res.end(buf);
 };
 
+/** 当前记忆租约：7351 只在没有其它写者持约时才允许写（F11）。 */
+function currentLeaseOwner() {
+  try {
+    const lease = JSON.parse(fs.readFileSync(path.join(dataDir(), 'state', 'engine-lease.json'), 'utf8'));
+    const live = Number(lease.heartbeatAt || 0) + Number(lease.ttlMs || 60000) > Date.now();
+    return { owner: String(lease.owner || ''), instanceId: String(lease.instanceId || ''), live };
+  } catch {
+    return null;
+  }
+}
+
 const server = http.createServer((req, res) => {  const url = new URL(req.url, 'http://127.0.0.1');
   if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
     try {
@@ -1282,6 +1294,7 @@ const server = http.createServer((req, res) => {  const url = new URL(req.url, '
   const key = `${req.method} ${url.pathname}`;
   const handler = routes[key];
   if (!handler) return send(res, 404, { error: 'not found' });
+  const requestDir = path.resolve(wbDataDir());
 
   // 写操作校验：设了 WORKBENCH_TOKEN 就必须带 x-workbench-token；
   // 没设则只监听 127.0.0.1（本来就是这样），启动日志里会给一句警告。
@@ -1303,14 +1316,32 @@ const server = http.createServer((req, res) => {  const url = new URL(req.url, '
     const got = String(req.headers['x-workbench-token'] || url.searchParams.get('token') || '');
     if (got !== WORKBENCH_TOKEN) return send(res, 401, { error: '缺少或错误的 x-workbench-token' });
   }
+  // 单写者约束：只要记忆租约被别的所有者（DSMP / bridge / 另一个实例）持有，
+  // 7351 就退回只读投影，写请求明确拒绝，而不是绕过租约直接改文件（F11）。
+  if (req.method !== 'GET') {
+    const lease = currentLeaseOwner();
+    if (lease && lease.live && lease.owner !== 'workbench') {
+      return send(res, 409, {
+        error: `记忆写入由 ${lease.owner || '未知写者'} 持有租约，7351 当前只读；请在 DSMP 面板或持约方操作`,
+        code: 'DSMP_WORKBENCH_READONLY',
+        lease
+      });
+    }
+  }
 
   let raw = '';
   req.on('data', (c) => { raw += c; if (raw.length > 1_000_000) req.destroy(); });
   req.on('end', () => {
     let body = {};
     if (raw.trim()) { try { body = JSON.parse(raw); } catch { return send(res, 400, { error: 'body 不是 JSON' }); } }
-    try { send(res, 200, handler(body, Object.fromEntries(url.searchParams))); }
-    catch (e) { send(res, e.status || 500, { error: String(e.message || e) }); }
+    try {
+      const run = () => handler(body, Object.fromEntries(url.searchParams));
+      if (req.method === 'GET') return send(res, 200, run());
+      if (path.resolve(wbDataDir()) !== requestDir) return send(res, 409, { code: 'DSMP_WORKBENCH_READONLY', error: '接收请求期间数据目录发生变化，请重试' });
+      const result = withWriteLease({ memoryDir: requestDir }, run);
+      send(res, 200, result);
+    }
+    catch (e) { send(res, e.status || (e.code === 'DSMP_LEASE_LOCK_TIMEOUT' ? 409 : 500), { code: e.code, error: String(e.message || e) }); }
   });
 });
 

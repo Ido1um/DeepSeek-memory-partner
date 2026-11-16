@@ -51,6 +51,20 @@ const BUILTIN_ENGINES = {
     scheduler: 'simple',
     width: 1024,
     height: 1024
+  },
+  anima: {
+    type: 'anima',
+    unet: 'anima-turbo-v1.1.safetensors',
+    clip: 'qwen_3_06b_base.safetensors',
+    vae: 'qwen_image_vae.safetensors',
+    steps: 10,
+    cfgScale: 1,
+    sampler: 'euler',
+    scheduler: 'simple',
+    width: 832,
+    height: 1216,
+    promptPrefix: 'masterpiece, best quality, score_7, safe',
+    negativePrompt: 'worst quality, low quality, score_1, score_2, score_3, artist name, blurry, jpeg artifacts, chromatic aberration'
   }
 };
 
@@ -67,24 +81,39 @@ function buildEngines(imageGen = {}) {
     if (!def || typeof def !== 'object') continue;
     const base = BUILTIN_ENGINES[id] || {};
     const merged = { ...base, ...def };
-    const type = String(merged.type || '').toLowerCase() === 'qwen' ? 'qwen' : 'sdxl';
+    const rawType = String(merged.type || '').toLowerCase();
+    const type = rawType === 'qwen' ? 'qwen' : rawType === 'anima' ? 'anima' : 'sdxl';
     out[id] = {
       id,
       type,
+      // enabled=false 的引擎不参与默认回落，也不接受显式点名叫它（暂时停用的模型）。
+      enabled: merged.enabled !== false,
       checkpoint: String(merged.checkpoint || BUILTIN_ENGINES.animagine.checkpoint),
       unet: String(merged.unet || BUILTIN_ENGINES.qwen.unet),
       clip: String(merged.clip || BUILTIN_ENGINES.qwen.clip),
       vae: String(merged.vae || BUILTIN_ENGINES.qwen.vae),
-      steps: clampNumber(merged.steps, 1, 40, type === 'qwen' ? 25 : 28),
-      cfgScale: clampNumber(merged.cfgScale, 1, 15, type === 'qwen' ? 1 : 5),
+      steps: clampNumber(merged.steps, 1, 40, type === 'qwen' ? 25 : type === 'anima' ? 10 : 28),
+      cfgScale: clampNumber(merged.cfgScale, 1, 15, type === 'qwen' || type === 'anima' ? 1 : 5),
       width: clampNumber(merged.width, 256, 1536, type === 'qwen' ? 1024 : 832),
       height: clampNumber(merged.height, 256, 1536, type === 'qwen' ? 1024 : 1216),
-      sampler: String(merged.sampler || (type === 'qwen' ? 'euler' : 'Euler a')).slice(0, 64),
-      scheduler: String(merged.scheduler || '')
+      sampler: String(merged.sampler || (type === 'qwen' || type === 'anima' ? 'euler' : 'Euler a')).slice(0, 64),
+      scheduler: String(merged.scheduler || ''),
+      promptPrefix: String(merged.promptPrefix || ''),
+      negativePrompt: String(merged.negativePrompt || ''),
+      triggerWords: String(merged.triggerWords || ''),
+      loras: Array.isArray(merged.loras)
+        ? merged.loras
+          .filter((l) => l && l.name)
+          .slice(0, 4)
+          .map((l) => ({
+            name: String(l.name).slice(0, 200),
+            strength: Math.min(2, Math.max(0, Number.isFinite(Number(l.strength)) ? Number(l.strength) : 0.7))
+          }))
+        : []
     };
   }
   for (const [id, base] of Object.entries(BUILTIN_ENGINES)) {
-    if (!out[id]) out[id] = { ...base, id };
+    if (!out[id]) out[id] = { ...base, id, enabled: true };
   }
   // comfy.checkpoint 仍是最直接的开关：没显式配 engines.animagine 时以它为准。
   if (!source.animagine && imageGen.comfy?.checkpoint) {
@@ -431,11 +460,25 @@ async function generateImageUnlocked(input = {}) {
   const prompt = String(input.prompt ?? '').trim();
   if (!prompt) throw new Error('prompt 不能为空');
   if (prompt.length > MAX_PROMPT_CHARS) throw new Error(`prompt 太长（最多 ${MAX_PROMPT_CHARS} 字）`);
-  // 引擎：input.engine 显式指定 > config.imageGen.engine 默认（animagine）。
-  // 认不出的值回落默认引擎并如实回报，避免主人说「用千问」却静默画了 Animagine。
+  // 引擎：input.engine 显式指定 > config.imageGen.engine 默认（现在是 illustrious）。
+  // 停用（enabled:false）的引擎既不接受点名、也不参与默认回落。
   const requestedEngine = String(input.engine || input.model || '').trim().toLowerCase();
-  const engine = cfg.engines[requestedEngine] || cfg.engines[cfg.engine] || cfg.engines.animagine;
-  const negativePrompt = String(input.negativePrompt ?? input.negative_prompt ?? cfg.defaultNegativePrompt).trim();
+  const enabledIds = Object.keys(cfg.engines).filter((id) => cfg.engines[id]?.enabled !== false);
+  if (requestedEngine && cfg.engines[requestedEngine] && cfg.engines[requestedEngine].enabled === false) {
+    throw new Error(`画图模型「${requestedEngine}」目前停用，可用：${enabledIds.join(' / ')}`);
+  }
+  const defaultId = cfg.engines[cfg.engine]?.enabled === false ? (enabledIds[0] || 'illustrious') : cfg.engine;
+  const engine = cfg.engines[requestedEngine] || cfg.engines[defaultId] || cfg.engines[enabledIds[0]] || cfg.engines.illustrious;
+  // 角色 LoRA 的触发词：引擎配了 triggerWords 且提示词里没出现第一个触发词时自动补到最前面，
+  // 补的是「实际送进采样的提示词」，返回值里也如实回报，方便主人核对。
+  const triggers = String(engine.triggerWords || '').trim();
+  const prefix = String(engine.promptPrefix || '').trim();
+  const firstTrigger = triggers ? triggers.split(',')[0].trim().toLowerCase() : '';
+  const needTrigger = Boolean(triggers && firstTrigger && !prompt.toLowerCase().includes(firstTrigger));
+  const effectivePrompt = [prefix, needTrigger ? triggers : '', prompt].filter(Boolean).join(', ');
+  const negativePrompt = String(
+    input.negativePrompt ?? input.negative_prompt ?? (engine.negativePrompt || cfg.defaultNegativePrompt)
+  ).trim();
   if (negativePrompt.length > MAX_NEGATIVE_CHARS) throw new Error(`negativePrompt 太长（最多 ${MAX_NEGATIVE_CHARS} 字）`);
   const width = normalizeSize(input.width, cfg.maxWidth, engine.width ?? cfg.defaultWidth);
   const height = normalizeSize(input.height, cfg.maxHeight, engine.height ?? cfg.defaultHeight);
@@ -448,7 +491,7 @@ async function generateImageUnlocked(input = {}) {
   const samplerName = String(input.samplerName || input.sampler_name || engine.sampler || 'Euler a').trim().slice(0, 64) || 'Euler a';
 
   const body = {
-    prompt,
+    prompt: effectivePrompt,
     negative_prompt: negativePrompt,
     width,
     height,
@@ -476,7 +519,7 @@ async function generateImageUnlocked(input = {}) {
       const out = await comfyGenerate({
         cfg: { ...cfg.comfy, timeoutMs: cfg.timeoutMs },
         engine,
-        prompt,
+        prompt: effectivePrompt,
         negativePrompt,
         width,
         height,
@@ -553,7 +596,8 @@ async function generateImageUnlocked(input = {}) {
     engine: usedEngine,
     backend: cfg.backend,
     elapsedMs: Date.now() - started,
-    prompt
+    prompt: effectivePrompt,
+    loras: Array.isArray(engine.loras) ? engine.loras : []
   };
 }
 

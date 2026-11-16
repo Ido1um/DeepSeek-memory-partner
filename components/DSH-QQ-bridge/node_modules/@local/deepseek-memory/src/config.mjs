@@ -1,20 +1,35 @@
 // 配置读取层：本包不要求 config.json 在自己目录里，而是读取 qq-bridge 的 config.json。
 //
 // 优先级（路径）：
-//   1. env `QQ_MEMORY_CONFIG` 指定的文件（测试、换机时用）
-//   2. 默认 `<DSMP_BRIDGE_DIR>\config.json`
+//   1. setConfigPath() 显式指定的文件（测试用）
+//   2. env `QQ_MEMORY_CONFIG` 指定的文件（测试、换机时用）
+//   3. 随包推导的 `<pluginRoot>/components/DSH-QQ-bridge/config.json`
+//   4. `<DSH_HOME>/dsmp-vendor-memory.json`（用户数据目录里的整体覆盖，可选）
 //
-// 优先级（数据目录）：env `QQ_MEMORY_DIR` > config.memory.dir > DEFAULT_DIR。
+// 优先级（数据目录）：env `QQ_MEMORY_DIR` > config.memory.dir > `<DSH_HOME>/dsmp-memory`（兜底）。
 //
 // 注意：这里只读，不写配置文件；写回仍由桥接面板/用户手动做。
+//
+// 2026-11-16 修：原先 DEFAULT_DIR / DEFAULT_CONFIG_PATH 写死为
+//   '<DSMP_MEMORY_DIR>' 与 '<DSMP_WORKSPACE>\...'，
+// 两个目录都已退役，读不到 config 时会静默回退到已删路径并每分钟重写（孤儿空目录）。
+// 现在一律从模块位置 + DSH_HOME 推导，换机/迁移/插件升级都不会再踩。
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readRef } from './miniyaml.mjs';
 
-export const DEFAULT_DIR = '<DSMP_MEMORY_DIR>';
-export const DEFAULT_CONFIG_PATH = '<DSMP_BRIDGE_DIR>\\config.json';
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/** 插件根目录（<DSH_HOME>/local-plugins/dsmp），由本文件位置推导，不写死机器路径。 */
+export const PLUGIN_ROOT = path.resolve(HERE, '..', '..', '..');
+
+export const DEFAULT_CONFIG_PATH = path.join(PLUGIN_ROOT, 'components', 'DSH-QQ-bridge', 'config.json');
+
+/** 兜底数据目录：放在用户数据目录下，绝不落安装目录、也不再落已退役的硬编码路径。 */
+export const DEFAULT_DIR = path.join(resolveDshHome(), 'dsmp-memory');
 export const DEFAULT_OWNER_QQ = '<OWNER_QQ>';
 export const DEFAULT_BASE_URL = 'https://api.deepseek.com/anthropic/v1';
 export const DEFAULT_MODEL = 'deepseek-v4-flash';
@@ -37,9 +52,20 @@ export function clearConfigCache() {
   cacheAt = 0;
 }
 
+const FALLBACK_CONFIG_PATH = path.join(resolveDshHome(), 'dsmp-vendor-memory.json');
+
 export function resolveConfigPath() {
+  if (configPath) return configPath;
   const envPath = String(process.env.QQ_MEMORY_CONFIG || '').trim();
-  return configPath || envPath || DEFAULT_CONFIG_PATH;
+  if (envPath) return envPath;
+  for (const candidate of [DEFAULT_CONFIG_PATH, FALLBACK_CONFIG_PATH]) {
+    try {
+      if (candidate && fs.existsSync(candidate)) return candidate;
+    } catch {
+      // 探测失败就试下一个
+    }
+  }
+  return DEFAULT_CONFIG_PATH;
 }
 
 /** 读 config.json（剥 BOM；失败回退旧缓存，不抛）。 */

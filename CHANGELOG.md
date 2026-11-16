@@ -1,3 +1,70 @@
+## 2.0.10 — 六项修复：实例门禁 / 租约锁 / 目录切换 / 草稿归属 / ZIP 预算 / 工作台写租约（2026-11-16）
+
+- NEW-01：默认写门禁校验本进程唯一实例，ESM 缓存副本共享同一进程身份；旧格式租约必须先 acquire 补齐身份再写。
+- NEW-02：锁元数据先完整写入候选文件，再用硬链接原子公布；空/半写/存活进程的锁不按文件年龄抢占；死进程锁串行回收，释放核对 nonce。无法确认归属时等待超时并拒绝写入。回收辅助锁若异常进程崩溃遗留，保守超时，需确认持有者退出后清理辅助锁。
+- NEW-03：宿主每次刷新配置同步更新 writer，guard 读取当前设置并包含活动根；开轮绑定目录与租约代次，await 后再次复核；丢失代次的旧轮拒绝落盘并退役。独立 fencing 计数器跨 release 保存，避免同实例重获租约后旧轮被误认有效。
+- F12：面板明确 source=panel，bridge 路由固定 source=bridge；开轮先登记，重复请求幂等，不同轮/来源冲突明确返回 409；拒绝其他来源 note/finish，保留合法来源草稿及已发内容。过期草稿同步退役；失联但空闲的面板轮记为 incomplete 后允许继续发送，避免长期卡忙。
+- F09：ZIP 默认限制输入 512 MiB、20,000 条目、单项 64 MiB、总解压 512 MiB；实际 inflate 有输出上限，校验中央/本地头和数据边界。archive、机器包和备份读取共享默认预算，超限 code=DSMP_ZIP_TOO_LARGE，不截断内容。
+- NEW-06：独立工作台在请求体收齐后核对活动目录，真实修改 handler 在共享排他区内取得独立 workbench 实例租约并同步写入，结束或异常释放；其他实例持约时返回 409。
+
+运行中宿主需重启或重新加载才能使用磁盘新代码；此次交付不自动执行重启、reload 或发布。
+
+## 2.0.9 — 审计第二批修复：租约 / 目录 / 导入事务 / 备份归属 / 7351（2026-11-16）
+
+基于 Codex 只读缺陷审计（`reports/DSMP-2.0.7-只读缺陷审计-20261115.md`）的第二批 11 条（F03/F04/F05/F06/F10/F11/F14/F15/F16/F17/F18）：
+
+- **F05 租约原子性与实例身份**：`lib/lease.js` 重写为 v2——排他锁文件（`<lease>.lock`，wx 创建，残留锁按 pid/时间自愈）内做「读-判-写」，新增随机 `instanceId` 与递增 `fencing`；续租/释放校验实例身份；过期接管递增 fencing；旧版无 instanceId 的租约可被同 owner 兼容接管。
+- **F06 在途写入代次**：`lib/memory-writer.js` 在 begin 时把租约代次钉在轮次上，note/finish 落盘前复核；换写者、恢复记忆树或换目录后旧任务拿不到同一代次，返回 `DSMP_LEASE_LOST` 并拒绝落盘。宿主在 `lib/index.js` 注入 `leaseGuardFor(settings)`。
+- **F14 目录单源**：`vendor/memory/src/store.mjs` 新增 `setActiveDir/activeDir`，`cfg()` 按 `boundDir || envDir || config.dir || DEFAULT_DIR` 解析；`lib/memory-engine.js` 巡检前把 store 绑定到当前引擎目录，避免引擎与 store 双根。
+- **F15 活动根统一**：`lib/index.js` 新增 `activeMemoryDir(settings)`（显式 `memory.dir` 优先，否则测试目录），备份/恢复/租约/媒体/心跳/导入导出全部改走它（17 处 `testMemoryDir(` 调用点）。
+- **F10 媒体越界**：`lib/media-store.js` 的 `mediaFilePathSafe` 与 `vendor/memory/src/media.mjs` 的 `mediaRelSafe` 校验索引内 rel（禁绝对路径/盘符/`..`/控制字符/尾部点空格，并用 realpath 复核仍在根内）。
+- **F18 备份归属**：备份 zip 的 sidecar 增 `kind:'dsmp-backup', version:1`；`listBackups` 只认自家备份（或旧格式 sidecar），无 sidecar 的普通 zip 不参与，`pruneBackups` 因此不再误删同目录其它项目备份。
+- **F03 导入事务**：`lib/archive.js` 的 `importArchive` 改为同盘 staging → 旧树 rename 备份 → staging 整体换位；写失败只清 staging、落位失败回滚旧树；目标为链接时 preflight 拒绝；成功返回 `backupDir`。
+- **F04 迁移 switch**：`lib/migrate.js` 的 `runMigration` 不再在 `switch applied:false` 时 rename 源目录；必须由调用方提供 `onSwitch` 回调并成功后才 cleanup，否则返回 `phase:'switch', needsSwitch:true` 且源目录原样保留；顺带去掉 agent/ 的重复复制。
+- **F16 换机包配置与角色**：`lib/machine-pack.js` 导入时从包内 `dsmp/settings.json` 吸收白名单配置（channel/inject/chat/panel/media/workbench/ui、memory 去掉 dir/owner/lease、backup 只留 keep），重写记忆目录与 liveCwd；包内有绑定会话才设置 liveId/boundId，否则清空旧绑定；`roles/*.md` 只在记忆目录内落盘，`roles.dir` 指向外部时跳过并在 plan 里说明。
+- **F11 7351 只读投影**：`workbench/server.mjs` 检查 `state/engine-lease.json`，租约被其它写者持有时写请求返回 409 `DSMP_WORKBENCH_READONLY`，不再绕过单写者直接改记忆。
+- **F17 7351 XSS**：`workbench/public/index.html` 新增 `jsq()`（JS 字符串字面量转义：反斜杠/引号/`<`/换行），候选与事实行的 `onclick` 内联 id 全部改用它，`esc()` 只负责 HTML 转义。
+
+**验证**：新增 `test/audit-batch2.test.mjs`（11 条：租约实例互斥/过期接管 fencing/旧租约补身份/残留锁自愈、store 活动目录、媒体越界、备份归属、迁移 switch 两种失败/成功路径、覆盖导入回滚、换机包设置与角色导入）；全套 **258/258 通过**。`lib/index.js`、`lib/lease.js` 等宿主内模块需重载插件或重启 DSH 后才进入运行进程。
+
+## 2.0.8 — 审计第一批修复：会话改写 / 归档 / 写鉴权（2026-11-16）
+
+基于 Codex 只读缺陷审计（`reports/DSMP-2.0.7-只读缺陷审计-20261115.md`）的第一批 6 条：
+
+- **F01 会话头改写**：`lib/migrate.js` 的 `rewriteSessionCwd` 改为只重压 header 帧，其余事件帧字节原样保留；写前备份 `<file>.bak-<stamp>`、写临时文件后原子替换；新增 `scanSessionFrames` 严格校验帧结构，尾部存在未写完的帧时抛 `DSMP_SESSION_LOG_TRUNCATED` 并拒绝改写（不再整份重压、不再静默丢尾帧）。换机导入调用时传 `backup:false`，不在目标会话目录留备份文件。
+- **F02 归档冲突**：`vendor/memory/src/store.mjs` 的 `archiveOld` 遇到同名归档不再直接删热日志；内容完全一致才删源，否则由 `mergeJsonlInto` 按时间合并两边全部行、去重后原子替换目标；合并失败保留源文件，等下次归档重试。
+- **F07 服务启停鉴权**：`WRITE_PATHS` 补 `/api/dsmp/services`、`/api/dsmp/selfcheck`、`/api/dsmp/client-error`，这些带副作用的 POST 统一走 `guardWrite`。
+- **F13 原生编辑身份**：`dsmp_memory_edit` 由 `{ by:'owner', role:'owner' }` 改为 `{ by:'self', role:'self' }`，不再能修改主人抽取事实（只能改她自己写的/关于她的条目）。
+- **F19 纠正确认事件**：`claims.confirmClaim` 的 supersede 事件对象改为 `{ ...base, id, ev:'supersede', … }`，`ev` 不再被 base 的 `ev:'fact'` 覆盖；旧事实现在会真正更新值并累加版本，而不是只追加一条假 fact。
+- **F21 RLE 帧解析**：`lib/session-log.js` 的 `frameRanges` 对 RLE 块（type=1）按 1 字节 payload 前进，修复含 RLE 压缩块的会话日志被误判为截断、进而在读日志/迁移时丢内容。
+
+**验证**：新增 `test/audit-batch1.test.mjs`（6 条：RLE 帧边界、普通帧解码、归档按时间合并、写鉴权名单、edit 用 self 身份、supersede 事件不被覆盖）；`test/m5.test.mjs` 改为断言「只重压 header 帧、事件帧字节不变、有 .bak、截断时拒绝且原文件不变」。全套 28 个测试文件 **247/247 通过**。
+
+## 2.0.7 — 迁移后修复概览视图的 bridge 探测（2026-11-15）
+
+- `GET /api/dsmp/workbench?view=overview` 误调用不存在的 `bridge.status()`，QQ 模式下返回 `bridge: { ok:false, error:"bridge.status is not a function" }`；改为走 `BridgeClient.status()` 并映射 mode/alive/role/dshReady。
+- 迁移到 `<DSH_HOME>\local-plugins\dsmp` 后重启 DSH，4 条 MCP、DSMP、QQ 桥接与面板均在线；此修复为迁移验收时发现。
+
+## 2.0.6 — 媒体墙纳入她发出去的图（2026-11-15）
+
+- **媒体墙补出站图片**：`mediaWallView` 现在除入站媒体库外，还合并 `<bridge>/data/generated` 里她通过 qq_send_image 真正发出去的图片（用 `logs/tool-calls.jsonl` 的发送记录过滤，未发送草稿不列入），出站行带 `direction=out` 和 `/api/dsmp/media/generated?path=…` URL，按时间倒序。
+- **面板渲染**：图片/语音的地址统一取 `row.url`（入站走 media/file，出站走 media/generated），点开原图用同一地址；总数显示合并后的数量。
+- **验证**：新增 `test/media-wall.test.mjs`（3 条，覆盖出站合并、草稿排除、语音与无 bridgeDir 回退）。
+
+## 2.0.5 — 聊天/历史记录显示她发出去的图片（2026-11-15）
+
+- **发图不显示**：qq_send_image 只写工具调用参数，没有 image 块，聊天和历史记录里她发出的图完全消失。lib/session-log.js 现在把 tool/call 里 send_image 的 data/generated/<file> 解析成图片气泡（[图片] + 图片 URL），其它路径一律忽略。
+- **图片代理**：新增 GET /api/dsmp/media/generated?path=data/generated/<file>，只允许生成目录内的 png/jpg/webp/gif（≤32MB），面板因此能显示她发出去的图，不用暴露本机路径。
+- **验证**：新增 test/session-log-media.test.mjs（3 条），全套 26 文件 **237/237**；在线历史合并记录里今天的发图已带 images。
+
+## 2.0.4 — 安全加固：压缩包路径校验、重复条目与面板锁（2026-11-15）
+
+- **路径穿越**：`lib/archive.js` 新增 `safeRelative` / `resolveInside` / `entryNameProblems`；`importArchive` 在写盘前先解析全部目标路径，`../`、绝对路径、盘符、控制字符、尾部点/空格一律拒绝（phase=verify/preflight）。`lib/backup.js` 提取层再用独立的 `safeTarget` 校验一次——即使 verify 被绕过也不会写到目标目录之外。
+- **重复/冲突条目**：`verifyArchive` 与 `verifyMachinePack` 先检查条目名是否重复、大小写/分隔符归一后是否冲突、manifest 哈希表的键是否合法；同名条目不再只验第一个。
+- **换机包回滚**：`importMachinePack` 失败时逆序恢复 memory / session / file 三类备份，并删除本次新建的记忆目录与会话目录；回滚异常收集进 `rollbackFailures` 返回，不再静默吞掉。
+- **面板锁**：新增 `lib/panel-turn.js`，把跨实例锁、busy 标记与账本记录统一为 open/markLedger/close；compose 或 begin 失败时也会释放锁，turn/end、异常、失联巡检都幂等关闭，只有账本 begin 成功才 finishTurn（修掉 180s 锁泄漏与漏记账）。
+- **验证**：新增 `archive-security` / `backup-security` / `machine-pack-rollback` / `panel-turn` 四组测试（18 条），全套 22 文件 **234/234**；生产记忆目录未改动。
+
 ## 2.0.3 — 备份面板可选手动路径、保留 2 份（2026-11-15）
 
 - 备份与恢复卡片新增「备份目录」输入 + 浏览…/保存路径/恢复默认：目录留空用默认 <DSH_HOME>/dsmp/backups，自定义目录在首次备份时自动创建。
@@ -354,14 +421,14 @@
 
 ## 1.7.0 — B3 她说过的语音（2026-11-08）
 
-- 语音库分向：`state/voice.jsonl` 每行新增 `direction`（`in`/`out`）、`speaker`（`owner`/`shenming`）、`text`、`textSource`（`tts-input`/`stt`/`library-meta`/`manual`）。旧行没有这些字段，按 `direction:'in'`、`speaker:'owner'` 兼容。
+- 语音库分向：`state/voice.jsonl` 每行新增 `direction`（`in`/`out`）、`speaker`（`owner`/`persona`）、`text`、`textSource`（`tts-input`/`stt`/`library-meta`/`manual`）。旧行没有这些字段，按 `direction:'in'`、`speaker:'owner'` 兼容。
 - 新增 `POST /api/dsmp/voice/sent`：她发出去的语音入库。TTS 的原文直接随发送参数带过来（`textSource:'tts-input'`），**不需要语音识别**；语音库文件没有原文时留空，面板显示「（没有原文）」，以后可补。
 - `lib/media-store.js`：`save()` 接 `direction/speaker/text/textSource`；已有 sha1 只补缺失的文本，后到的空文本不会冲掉已有原文，`manual` 可以人工覆盖，`direction`/`speaker` 不翻转。
-- `lib/voice-inbound.js`：抽出 `decodeVoice()` 统一两个方向的 base64 校验；`saveOutboundVoice()` 落 `direction:'out'`、`speaker:'shenming'`、`alt:'<PERSONA>发出'`，原文压空白、截 2000 字。
+- `lib/voice-inbound.js`：抽出 `decodeVoice()` 统一两个方向的 base64 校验；`saveOutboundVoice()` 落 `direction:'out'`、`speaker:'persona'`、`alt:'<PERSONA>发出'`，原文压空白、截 2000 字。
 - `bridge/src/bridge.js`：新增 `forwardOutboundVoice()`。`/api/socialV2/tts` 成功后带 `text` + `textSource:'tts-input'` 回报；`/api/socialV2/send-voice` 成功后只报音频（没有原文）。失败只记日志，不影响发送。
 - 面板 `VoiceCard` 分两组：「她说过的」（带原文/「（识别）」/「（没有原文）」与「发这条」）和「主人发来的」（只听）。`qq-outbound` 的来源标签是「QQ · 她说」。
 - 测试：`test/voice-inbound.test.mjs` 增 4 条（TTS 原文、无原文留空、后补原文不覆盖人工修订、同段先 in 后 out 不翻转）。全套 125/125；验收 19/19；沙箱 25/25。
-- 在线自检（DSH 53466，`dev/verify-b3.mjs`）：`POST /voice/sent` 200 → sha1 `065810d3…`、4044 B、`direction:'out'`、`textSource:'tts-input'`；列表返回 out/shenming/原文；不带原文重报 `dup:true` 且原文未被冲掉；`media/file` 逐字节一致。
+- 在线自检（DSH 53466，`dev/verify-b3.mjs`）：`POST /voice/sent` 200 → sha1 `065810d3…`、4044 B、`direction:'out'`、`textSource:'tts-input'`；列表返回 out/persona/原文；不带原文重报 `dup:true` 且原文未被冲掉；`media/file` 逐字节一致。
 - 踩坑：`voice-inbound.js` 不能在模块顶层 `import './media-store.js'`——开发期 data:URL 热重载会 `ERR_UNSUPPORTED_RESOLVE_REQUEST` 让整个插件激活失败（表现为 `/api/dsmp/*` 全 404）。现在音频嗅探内置在该模块里，落库时 media-store 再判一次。
 - 回滚：还原 `_retired\_b3-20261108-2107` 的 6 个文件；已写入的 `direction`/`text` 字段向后兼容，可保留。
 
@@ -798,7 +865,7 @@ P0 处理「账本里的脏数据 + 长时间运行的恢复路径」，不新�
 ### 数据布局规范化（2026-11-07，M3 前置）
 
 - 新增语音库 `voice\`（与图片库 `media\` 平级）+ 空索引 `state\voice.jsonl`；图片/语音都按 sha1 内容寻址。
-- 移走 9 个散落备份（`profile.md.bak-*` ×5、`state\*.bak-*` ×4）到 `backup\shenming-layout-20261107-001817\moved\`，附 `manifest.json`。
+- 移走 9 个散落备份（`profile.md.bak-*` ×5、`state\*.bak-*` ×4）到 `backup\persona-layout-20261107-001817\moved\`，附 `manifest.json`。
 - 新增 `scripts/check-memory-layout.mjs`：检查必需目录/文件、bak 回潮、索引与文件数一致性（23 项，只读）。
 - 引擎硬编码路径（`state\`、`raw\`、`window\`、`episodes\`、`media\`、`profile.md`、`rules.md`）一律不改名；改名前必须先改 vendor 与 bridge 源副本并在 M6 做。
 
@@ -806,4 +873,3 @@ P0 处理「账本里的脏数据 + 长时间运行的恢复路径」，不新�
 
 - `test/dsmp.test.mjs` **26 条全过**；`acceptance-check` 生产库 17 通过 / 0 失败 / 1 跳过（库里已无「未过期的带日期待办」，同一副本加一条活待办后 18/18）；`sandbox-check` 25/25。
 - M2 期间生产记忆零写入（`state/longterm.jsonl` 未由 DSMP 改动）；QQ 真实消息零发送。
-

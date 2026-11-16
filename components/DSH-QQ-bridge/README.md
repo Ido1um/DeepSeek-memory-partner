@@ -249,7 +249,7 @@ npm start          # 或双击 start.bat（守护模式：崩溃自动重启，�
 - 关掉的写法：`memory.enabled: false`（日志不再写、不再轮转），或 `socialV2.tools.memorySearch: false`（只关检索工具）；`memory.summary.enabled: false` 只关模型摘要、保留提取式；`memory.profile.enabled: false` 只关事实卡。
 - 离线自测：包里 `node test/memory.test.mjs`（20 个场景，临时目录 + `QQ_MEMORY_DIR` 隔离）。桥接仓库旧的 `scripts/test-memory.mjs` 已于 2026-10-29 随旧实现一起移除（备份 `backup/test-memory.mjs.removed-20261029`）；桥接的 `npm run test:memory` 现在直接跑包内测试。
 - 迁移旧布局：停桥接后 `node "<DSMP_MEMORY_SRC>\src\migrate.mjs"`（幂等，把 `hot/`、`archive/` 搬进 `raw/`）。
-- DSH 原生记忆（`.dsh\memories`）：`node "<DSMP_MEMORY_SRC>\scripts\mirror-dsh-memories.mjs"` 镜像到 `shenming\dsh-memories`；想做 junction（需 DSH 完全退出）用 `scripts\link-dsh-memories.mjs --yes`。
+- DSH 原生记忆（`.dsh\memories`）：`node "<DSMP_MEMORY_SRC>\scripts\mirror-dsh-memories.mjs"` 镜像到 `persona\dsh-memories`；想做 junction（需 DSH 完全退出）用 `scripts\link-dsh-memories.mjs --yes`。
 
 归档是**只增不减**的：要清理只能手工删 `archive/` 下的文件，桥接自己永远不会删。
 

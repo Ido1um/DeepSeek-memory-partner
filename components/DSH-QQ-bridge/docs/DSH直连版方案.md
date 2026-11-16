@@ -150,7 +150,7 @@ QQ → SnowLuma → qq-bridge ──共用同一记忆目录──► 同一引�
    - 只负责：显示记忆状态、`轮转`按钮、切到新会话。
    - 没有它，Phase 1/2 仍可用命令行/手动新会话；Phase 3 的“自动切”需要它。
 
-3. **`shenming` agent preset**
+3. **`persona` agent preset**
    - 角色卡：`roles\<PERSONA>.md`。
    - 工具白名单：`memory_search`、`memory_recent`、`memory_status`（只读），以及用户明确需要的安全工具；不默认开 shell/fs/网络。
    - 每轮/每会话由 preset 与 host 插件共同决定注入。
@@ -283,7 +283,7 @@ QQ → SnowLuma → qq-bridge ──共用同一记忆目录──► 同一引�
 
 ### 7.1 预设
 
-建议新增 `shenming` preset（不动现有 `qq-chat-v2`）：
+建议新增 `persona` preset（不动现有 `qq-chat-v2`）：
 
 - persona：`roles\<PERSONA>.md`（主名<PERSONA>，小名<PERSONA_ALT>）。
 - 工具：`memory_search` / `memory_recent` / `memory_status`（只读），按需加 `read_image` 等安全工具。
@@ -328,7 +328,7 @@ QQ → SnowLuma → qq-bridge ──共用同一记忆目录──► 同一引�
 
 | 阶段 | 内容 | 交付物 | 预计 | 验收 |
 |---|---|---|---|---|
-| Phase 0 | 备份/冻结；建插件骨架与 `shenming` preset；不写记忆 | 可启动空插件；DSH 能加载 preset | 0.5–1 天 | 插件加载无报错；preset 可选；不影响 QQ |
+| Phase 0 | 备份/冻结；建插件骨架与 `persona` preset；不写记忆 | 可启动空插件；DSH 能加载 preset | 0.5–1 天 | 插件加载无报错；preset 可选；不影响 QQ |
 | Phase 1 | 捕获 + 写入 + 只读 `memory_search`；不注入/不轮转 | 直聊消息进 raw/hot；检索可查 | 2–3 天 | 3 轮对话全入库；重启不重复；QQ 记忆可查 |
 | Phase 2 | 注入事实卡/交接；POC-1 时序验证；失败回退 | 新会话首条 prompt 带记忆；不重复 | 3–4 天 | 模型能复述注入标记；失败不阻塞聊天 |
 | Phase 3 | 轮转 + 新会话 + UI 切换；POC-2 | 自动/半自动轮转；旧会话归档 | 4–5 天 | 强制轮转成功；新会话首条带交接；UI 可切 |

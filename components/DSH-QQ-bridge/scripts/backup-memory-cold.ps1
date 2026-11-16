@@ -77,7 +77,7 @@ function Invoke-Hot([string]$why) {
 }
 
 $month = Get-Date -Format 'yyyy-MM'
-$snapshots = '<BACKUP_ROOT>\dsmp-memory\snapshots'
+$snapshots = '<BACKUP_ROOT>\DeepSeek work\dsmp-memory\snapshots'
 
 if (-not $Force) {
   $coldThisMonth = Get-ChildItem -LiteralPath $snapshots -Directory -ErrorAction SilentlyContinue |

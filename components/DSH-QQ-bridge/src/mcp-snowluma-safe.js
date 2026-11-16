@@ -1260,13 +1260,13 @@ if (cfg.socialV2?.tools?.getImages !== false) {
 if (cfg.socialV2?.tools?.generateImage !== false) {
   server.tool(
     'qq_generate_image',
-    '根据文字提示调用本机画图引擎（ComfyUI）生成一张图，保存到 data/generated 并返回 path。适用：用户明确让你画图/生成图片；不适用：纯聊天、表情包、用户只是描述场景。生成后必须再用 qq_send_image 把图发到会话，不要只生成不发。prompt 用英文 tag 效果最好（如 "masterpiece, best quality, 1girl, blue hair"）；默认尺寸/步数由 config.imageGen 决定（HD 建议 832x1216、28 步），宽高上限 1536，且宽×高不得超过 1,600,000 像素。**模型默认 animagine，不要自己换**：只有主人在这一轮明确说「用千问 / Qwen / Qwen-Image」才传 engine=qwen（约 105 秒一张，中文文字最准），说要「氛围向 / 场景向」可传 engine=illustrious。一次只跑一张，排队最多 2 张；空闲 5 分钟自动卸载模型，空闲 10 分钟自动停止引擎进程释放内存和显存；下一次生成会自动启动并重新加载，所以第一张可能较慢（约 40-90 秒；qwen 更慢）。返回 path/relativePath/宽高/耗时/engine；若引擎 API 未启动会报错，不要假装画好。',
+    '根据文字提示调用本机画图引擎（ComfyUI）生成一张图，保存到 data/generated 并返回 path。适用：用户明确让你画图/生成图片；不适用：纯聊天、表情包、用户只是描述场景。生成后必须再用 qq_send_image 把图发到会话，不要只生成不发。prompt 用英文 tag 效果最好（如 "masterpiece, best quality, 1girl, blue hair"）；默认尺寸/步数由 config.imageGen 决定（832x1216、10 步、cfg 1），宽高上限 1536，且宽×高不得超过 1,600,000 像素。**默认模型就是 Anima Turbo（不传 engine 即可），不要自己换模型**：主人在这一轮明确要「画<PERSONA>/<PERSONA_NICK>/鲸鱼女仆本人/你自己」时才传 engine=whale（Anima + 角色 LoRA，触发词会自动补，约 16 秒一张）；主人在这一轮明确说「用千问/Qwen/Qwen-Image 画」「要中文文字/海报」时才传 engine=qwen（约 1-2 分钟一张，显存吃紧）。animagine 与 illustrious 目前停用，不要传，传了会直接报错。一次只跑一张，排队最多 2 张；空闲 5 分钟自动卸载模型，空闲 10 分钟自动停止引擎进程释放内存和显存；下一次生成会自动启动并重新加载，所以第一张可能较慢（约 40-90 秒）。返回 path/relativePath/宽高/耗时/engine/model/loras；若引擎 API 未启动会报错，不要假装画好。',
     {
       prompt: z.string().describe('英文/中文画面描述；英文 tag 效果最好'),
-      engine: z.enum(['animagine', 'illustrious', 'qwen']).optional().describe('画图模型。默认 animagine；只有主人本轮明确要「用千问/Qwen/Qwen-Image」时才传 qwen；主人要「氛围向/场景向」可传 illustrious。其他情况不要传。'),
+      engine: z.enum(['anima', 'whale', 'qwen']).optional().describe('画图模型。不传 = anima（默认，画别人/场景/泛用角色，10 步约 10-16 秒）；主人明确要「画<PERSONA>/<PERSONA_NICK>/鲸鱼女仆/画你自己」时传 whale（Anima + 角色 LoRA，触发词自动补）；只有主人这一轮明确说「用千问/Qwen/Qwen-Image 画」时才传 qwen（约 1-2 分钟一张）。animagine 与 illustrious 已停用，不要传。'),
       negativePrompt: z.string().optional().describe('负面提示词，可选'),
-      width: z.number().optional().describe('宽 256~1536，默认由引擎决定（animagine 832、qwen 1024；会取 64 的倍数）'),
-      height: z.number().optional().describe('高 256~1536，默认由引擎决定（animagine 1216、qwen 1024；会取 64 的倍数）'),
+      width: z.number().optional().describe('宽 256~1536，默认 832（whale 同）；会取 64 的倍数'),
+      height: z.number().optional().describe('高 256~1536，默认 1216（whale 同）；会取 64 的倍数'),
       steps: z.number().optional().describe('采样步数 1~30，默认由引擎决定（animagine 28、qwen 25）'),
       cfgScale: z.number().optional().describe('CFG 1~15，默认由引擎决定（animagine 5、qwen 固定 1）'),
       seed: z.number().optional().describe('随机种子，-1 为随机'),

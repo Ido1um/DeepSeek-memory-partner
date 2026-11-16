@@ -14,13 +14,26 @@ import { DEFAULT_DIR, loadConfig, clearConfigCache, memorySection, ownerQQ } fro
 const MAX_MESSAGE_CHARS = 8000;
 const SEARCH_MIN_QUERY = 1;
 
+// 显式绑定的活动目录：由宿主（DSMP 记忆引擎）在每次维护前设置，
+// 避免「引擎拿着 A 目录、store 却按 config/env 落到 B 目录」的双根写入。
+let ACTIVE_DIR = '';
+
+export function setActiveDir(dir = '') {
+  ACTIVE_DIR = String(dir || '').trim();
+}
+
+export function activeDir() {
+  return ACTIVE_DIR;
+}
+
 export { clearConfigCache };
 
 function cfg() {
   const c = memorySection();
   // 测试隔离：QQ_MEMORY_DIR 只覆盖当前进程的日志目录，生产环境不设置这个变量。
   const envDir = String(process.env.QQ_MEMORY_DIR || '').trim();
-  const dir = envDir || String(c.dir || DEFAULT_DIR).trim() || DEFAULT_DIR;
+  const boundDir = ACTIVE_DIR;
+  const dir = boundDir || envDir || String(c.dir || DEFAULT_DIR).trim() || DEFAULT_DIR;
   const dailyAt = String(c.dailyAt || '').trim();
   return {
     enabled: c.enabled !== false,
@@ -313,6 +326,43 @@ export function recordOutgoing({ key, text, time, messageId, source = 'assistant
   return recordMessage({ key, role: 'assistant', text, sender: '<PERSONA_ALT>', time, messageId, source });
 }
 
+/**
+ * 归档目标已存在时按行合并：保留两边全部行、按时间排序、去重，再原子替换目标。
+ * 只允许在目标持久化成功之后由调用方删除源文件。
+ */
+export function mergeJsonlInto(src, target) {
+  const readLines = (file) => fs.readFileSync(file, 'utf8').split('\n').filter((line) => line.trim());
+  const targetLines = readLines(target);
+  const seen = new Set(targetLines.map((line) => line.trim()));
+  const merged = targetLines.slice();
+  for (const line of readLines(src)) {
+    const key = line.trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(line);
+  }
+  const tsOf = (line) => {
+    try {
+      const row = JSON.parse(line);
+      return Number(row.at || row.ts || row.time || row.sentAt || 0) || 0;
+    } catch {
+      return 0;
+    }
+  };
+  merged.sort((a, b) => tsOf(a) - tsOf(b));
+  const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    fs.writeFileSync(tmp, `${merged.join('\n')}\n`, 'utf8');
+    fs.renameSync(tmp, target);
+  } catch (err) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {}
+    throw err;
+  }
+  return merged.length;
+}
+
 /** 把 7 天窗口之外的 hot 日目录移动到 archive；返回移动的文件数。 */
 export function archiveOld(now = Date.now()) {
   try {
@@ -338,11 +388,20 @@ export function archiveOld(now = Date.now()) {
           const target = path.join(d.archive, monthStr(day), `${file.replace(/\.jsonl$/, '')}-${day}.jsonl`);
           try {
             fs.mkdirSync(path.dirname(target), { recursive: true });
-            if (fs.existsSync(target)) fs.unlinkSync(src);
-            else fs.renameSync(src, target);
+            if (fs.existsSync(target)) {
+              // 目标已存在：内容完全一致才删源；否则合并两边全部行（保留独有消息）。
+              if (fs.readFileSync(src).equals(fs.readFileSync(target))) {
+                fs.unlinkSync(src);
+              } else {
+                mergeJsonlInto(src, target);
+                fs.unlinkSync(src);
+              }
+            } else {
+              fs.renameSync(src, target);
+            }
             moved += 1;
           } catch {
-            // 单个文件失败不影响其它文件；下次归档会再试。
+            // 单个文件失败不影响其它文件；下次归档会再试（源文件保留）。
           }
         }
         try {

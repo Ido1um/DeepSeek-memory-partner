@@ -161,13 +161,36 @@ export function toMediaRef(row) {
   };
 }
 
+/** 媒体索引视为不可信输入：rel 必须是记忆根内的普通相对路径，且不能借链接逃逸。 */
+export function mediaRelSafe(dir, rel) {
+  const raw = String(rel || '').replace(/\\/g, '/');
+  if (!raw || raw.startsWith('/') || /^[a-zA-Z]:/.test(raw)) return null;
+  const parts = raw.split('/');
+  for (const part of parts) {
+    if (!part || part === '.' || part === '..') return null;
+    if (part.endsWith('.') || part.endsWith(' ')) return null;
+    if (/[\u0000-\u001f<>:"|?*]/.test(part)) return null;
+  }
+  const base = path.resolve(String(dir || ''));
+  const abs = path.resolve(base, raw);
+  if (abs === base || !abs.startsWith(base + path.sep)) return null;
+  try {
+    const realBase = fs.realpathSync.native ? fs.realpathSync.native(base) : fs.realpathSync(base);
+    const realAbs = fs.realpathSync.native ? fs.realpathSync.native(abs) : fs.realpathSync(abs);
+    if (realAbs !== realBase && !realAbs.startsWith(realBase + path.sep)) return null;
+  } catch {
+    // 文件不存在时无法 realpath，按字符串校验结果继续（读取会自然失败）。
+  }
+  return abs;
+}
+
 /** 读回图片字节（供 qq_memory_photo 使用）。 */
 export function readMedia(dir, sha1) {
   const rows = readMediaIndex(dir).filter((row) => row.sha1 === String(sha1 || '').trim());
   if (!rows.length) return null;
   const row = rows[rows.length - 1];
-  const abs = path.join(String(dir), row.rel || '');
-  if (!fs.existsSync(abs)) return null;
+  const abs = mediaRelSafe(dir, row.rel);
+  if (!abs || !fs.existsSync(abs)) return null;
   const buffer = fs.readFileSync(abs);
   return {
     buffer,

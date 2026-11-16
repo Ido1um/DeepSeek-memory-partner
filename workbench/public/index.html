@@ -739,6 +739,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// 放进单引号 JS 字符串字面量的值必须按 JS 规则转义；esc 只处理 HTML，挡不住 `');...`。
+const jsq = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/</g, '\\x3c').replace(/\r/g, '\\r').replace(/\n/g, '\\n');
 const nz = (n) => (n || 0).toLocaleString('zh-CN');
 const saidDay = (ms) => { if (!ms) return '—'; const d = new Date(ms); if (Number.isNaN(d.getTime())) return '—'; return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const ago = (ms) => {
@@ -1066,8 +1068,8 @@ function renderClaims(c) {
     return '<tr><td>' + wbEsc((x.quote || '').slice(0, 220)) + '<div class="dim">' + wbEsc(from) + '</div></td>'
       + '<td>' + wbEsc(tgt) + prog + '</td>'
       + '<td>' + wbEsc(x.suggestedValue || '') + '</td>'
-      + '<td class="num"><button class="mini" onclick="claimOp(\'confirm\',\'' + x.id + '\')">确认</button> '
-      + '<button class="mini" onclick="claimOp(\'reject\',\'' + x.id + '\')">驳回</button></td></tr>';
+      + '<td class="num"><button class="mini" onclick="claimOp(\'confirm\',\'' + jsq(x.id) + '\')">确认</button> '
+      + '<button class="mini" onclick="claimOp(\'reject\',\'' + jsq(x.id) + '\')">驳回</button></td></tr>';
   }).join('');
 }
 
@@ -1221,13 +1223,13 @@ function render(s) {
       <td class="edt" data-l="等级 / 分数"><div class="edtctl" style="${dead ? 'opacity:.4;pointer-events:none' : ''}"><select id="tier-${esc(f.id)}"${dead ? ' disabled' : ''}>${['hard', 'long', 'general', 'temp']
         .map((t) => `<option value="${t}"${t === (f.tier || 'general') ? ' selected' : ''}>${t}</option>`).join('')}</select>
         <input id="score-${esc(f.id)}" type="number" min="1" max="100" step="1" value="${f.score ?? f.base ?? 50}"${dead ? ' disabled' : ''}>
-        <button class="mini" onclick="factSave('${esc(f.id)}')"${dead ? ' disabled' : ''}>存</button>
-        ${f.manual ? `<button class="mini" onclick="fact('${esc(f.id)}','reset')">还原</button>` : ''}</div></td>
-      <td class="num" data-l="状态"><div class="actctl"><button class="mini" onclick="editFact('${esc(f.id)}')" title="改这条（旧值留在历史里）">改</button><button class="mini" onclick="showHistory('${esc(f.id)}')" title="看这条的修订历史">历史</button>${merged
-        ? `<span class="tag inv" title="已并进 ${esc(f.mergedInto || '')}">已合并 → #${esc((f.mergedInto || '').slice(-6))}</span> <button class="mini" onclick="fact('${esc(f.id)}','unmerge')">拆开</button>`
+        <button class="mini" onclick="factSave('${jsq(f.id)}')"${dead ? ' disabled' : ''}>存</button>
+        ${f.manual ? `<button class="mini" onclick="fact('${jsq(f.id)}','reset')">还原</button>` : ''}</div></td>
+      <td class="num" data-l="状态"><div class="actctl"><button class="mini" onclick="editFact('${jsq(f.id)}')" title="改这条（旧值留在历史里）">改</button><button class="mini" onclick="showHistory('${jsq(f.id)}')" title="看这条的修订历史">历史</button>${merged
+        ? `<span class="tag inv" title="已并进 ${esc(f.mergedInto || '')}">已合并 → #${esc((f.mergedInto || '').slice(-6))}</span> <button class="mini" onclick="fact('${jsq(f.id)}','unmerge')">拆开</button>`
         : f.invalidated
-        ? `<span class="tag inv">作废</span> <button class="mini" onclick="fact('${esc(f.id)}','reinstate')">撤销</button>`
-        : `<button class="mini danger" onclick="fact('${esc(f.id)}','invalidate')">作废</button>`}</div></td></tr>`;
+        ? `<span class="tag inv">作废</span> <button class="mini" onclick="fact('${jsq(f.id)}','reinstate')">撤销</button>`
+        : `<button class="mini danger" onclick="fact('${jsq(f.id)}','invalidate')">作废</button>`}</div></td></tr>`;
   }).join('')
     : '<tr><td colspan="9" class="empty">尚无长期事实 — 打分引擎还没写入过，此处会随 longterm.jsonl 出现自动填充</td></tr>';
   $('factFoot').textContent = s.facts.length

@@ -294,6 +294,8 @@ function parseSnapshot(seg = '') {
 }
 
 export function beginTurn({
+  source = '',
+  turnId = '',
   key = '',
   sessionId = '',
   userRaw = '',
@@ -307,6 +309,11 @@ export function beginTurn({
   at = Date.now()
 } = {}) {
   if (!sessionId) return null;
+  const existing = getDraft(sessionId);
+  if (existing) {
+    if (turnId && existing.turnId === turnId && existing.source === source) return existing;
+    throw Object.assign(new Error('此会话已有未收尾草稿'), { code: 'DSMP_TURN_IN_PROGRESS' });
+  }
   const promptText = String(userRaw ?? '');
   let rawText = ownerTextOf(promptText).slice(0, MAX_USER_RAW);
   const draftMsgIds = Array.isArray(msgIds) ? msgIds.map(String) : [];
@@ -327,6 +334,8 @@ export function beginTurn({
     return Number.isFinite(p) ? p : Date.now();
   })();
   const draft = {
+    source,
+    turnId,
     key: String(key || ''),
     sessionId: String(sessionId),
     at: atMs,

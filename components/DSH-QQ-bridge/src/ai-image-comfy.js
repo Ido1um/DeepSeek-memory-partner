@@ -46,30 +46,53 @@ export function mapSampler(name) {
   return { samplerName: 'euler_ancestral', scheduler: 'normal' };
 }
 
-export function buildWorkflow({ checkpoint, prompt, negativePrompt, width, height, steps, cfgScale, seed, samplerName, scheduler }) {
-  return {
+export function buildWorkflow({ checkpoint, prompt, negativePrompt, width, height, steps, cfgScale, seed, samplerName, scheduler, loras = [] }) {
+  const nodes = {
     1: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: checkpoint } },
-    2: { class_type: 'CLIPTextEncode', inputs: { text: prompt, clip: ['1', 1] } },
-    3: { class_type: 'CLIPTextEncode', inputs: { text: negativePrompt, clip: ['1', 1] } },
     4: { class_type: 'EmptyLatentImage', inputs: { width, height, batch_size: 1 } },
-    5: {
-      class_type: 'KSampler',
-      inputs: {
-        seed: seed >>> 0,
-        steps,
-        cfg: cfgScale,
-        sampler_name: samplerName,
-        scheduler,
-        denoise: 1,
-        model: ['1', 0],
-        positive: ['2', 0],
-        negative: ['3', 0],
-        latent_image: ['4', 0]
-      }
-    },
     6: { class_type: 'VAEDecode', inputs: { samples: ['5', 0], vae: ['1', 2] } },
     7: { class_type: 'SaveImage', inputs: { images: ['6', 0], filename_prefix: 'qqbot/tmp' } }
   };
+  // LoRA 串成链：CheckpointLoader → LoraLoader(10) → LoraLoader(11) → …；
+  // 只有 model/clip 被重接，VAE 仍取 checkpoint 的 1:2，避免 LoraLoader 无 VAE 输出。
+  let modelRef = ['1', 0];
+  let clipRef = ['1', 1];
+  let nextId = 10;
+  for (const lora of Array.isArray(loras) ? loras : []) {
+    if (!lora || !lora.name) continue;
+    const id = String(nextId++);
+    const strength = Number.isFinite(Number(lora.strength)) ? Number(lora.strength) : 0.7;
+    nodes[id] = {
+      class_type: 'LoraLoader',
+      inputs: {
+        model: modelRef,
+        clip: clipRef,
+        lora_name: lora.name,
+        strength_model: Number.isFinite(Number(lora.strengthModel)) ? Number(lora.strengthModel) : strength,
+        strength_clip: Number.isFinite(Number(lora.strengthClip)) ? Number(lora.strengthClip) : strength
+      }
+    };
+    modelRef = [id, 0];
+    clipRef = [id, 1];
+  }
+  nodes[2] = { class_type: 'CLIPTextEncode', inputs: { text: prompt, clip: clipRef } };
+  nodes[3] = { class_type: 'CLIPTextEncode', inputs: { text: negativePrompt, clip: clipRef } };
+  nodes[5] = {
+    class_type: 'KSampler',
+    inputs: {
+      seed: seed >>> 0,
+      steps,
+      cfg: cfgScale,
+      sampler_name: samplerName,
+      scheduler,
+      denoise: 1,
+      model: modelRef,
+      positive: ['2', 0],
+      negative: ['3', 0],
+      latent_image: ['4', 0]
+    }
+  };
+  return nodes;
 }
 
 /**
@@ -114,11 +137,60 @@ export function buildQwenWorkflow({ unet, clip, vae, prompt, negativePrompt, wid
   };
 }
 
+/**
+ * Anima 工作流：主模型是 UNETLoader（diffusion_models 目录），文本编码器是 Qwen3-0.6B
+ * （CLIPLoader type 写 stable_diffusion，ComfyUI 检测到 QWEN3_06B 会自动走 Anima 的 TE），
+ * VAE 与 Qwen-Image 共用 qwen_image_vae；LoRA 只有 model 一侧，所以用 LoraLoaderModelOnly。
+ * Turbo 版本官方要求 CFG 1、8-12 步。节点 id 固定，SaveImage 在 9 号。
+ */
+export function buildAnimaWorkflow({ unet, clip, vae, prompt, negativePrompt, width, height, steps, cfgScale, seed, samplerName, scheduler, loras = [] }) {
+  const nodes = {
+    1: { class_type: 'UNETLoader', inputs: { unet_name: unet, weight_dtype: 'default' } },
+    3: { class_type: 'CLIPLoader', inputs: { clip_name: clip, type: 'stable_diffusion' } },
+    4: { class_type: 'VAELoader', inputs: { vae_name: vae } },
+    5: { class_type: 'EmptyLatentImage', inputs: { width, height, batch_size: 1 } },
+    8: { class_type: 'VAEDecode', inputs: { samples: ['7', 0], vae: ['4', 0] } },
+    9: { class_type: 'SaveImage', inputs: { images: ['8', 0], filename_prefix: 'qqbot/anima' } }
+  };
+  let modelRef = ['1', 0];
+  let nextId = 10;
+  for (const lora of Array.isArray(loras) ? loras : []) {
+    if (!lora || !lora.name) continue;
+    const id = String(nextId++);
+    const strength = Number.isFinite(Number(lora.strength)) ? Number(lora.strength) : 0.8;
+    nodes[id] = {
+      class_type: 'LoraLoaderModelOnly',
+      inputs: {
+        model: modelRef,
+        lora_name: lora.name,
+        strength_model: Number.isFinite(Number(lora.strengthModel)) ? Number(lora.strengthModel) : strength
+      }
+    };
+    modelRef = [id, 0];
+  }
+  nodes[2] = { class_type: 'CLIPTextEncode', inputs: { text: prompt, clip: ['3', 0] } };
+  nodes[6] = { class_type: 'CLIPTextEncode', inputs: { text: negativePrompt, clip: ['3', 0] } };
+  nodes[7] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: modelRef,
+      seed: seed >>> 0,
+      steps,
+      cfg: cfgScale,
+      sampler_name: samplerName,
+      scheduler,
+      denoise: 1,
+      positive: ['2', 0],
+      negative: ['6', 0],
+      latent_image: ['5', 0]
+    }
+  };
+  return nodes;
+}
+
 function normalizeBase(url) {
   return String(url || 'http://127.0.0.1:8188').replace(/\/+$/, '');
 }
-
-/** 探活：ComfyUI 的 /system_stats 无条件 200，且比 /queue 便宜。 */
 export async function comfyProbe(baseUrl, timeoutMs = 2500) {
   try {
     const res = await fetch(`${normalizeBase(baseUrl)}/system_stats`, { signal: AbortSignal.timeout(timeoutMs) });
@@ -154,8 +226,17 @@ export async function comfySystemStats(baseUrl) {
 export async function comfyGenerate({ cfg, engine, prompt, negativePrompt, width, height, steps, cfgScale, seed, samplerName }) {
   const base = normalizeBase(cfg.baseUrl);
   const useQwen = engine?.type === 'qwen';
-  const mapped = useQwen ? { samplerName: String(engine.sampler || 'euler'), scheduler: String(engine.scheduler || 'simple') } : mapSampler(samplerName);
+  const useAnima = engine?.type === 'anima';
+  const mapped = (useQwen || useAnima)
+    ? { samplerName: String(engine.sampler || 'euler'), scheduler: String(engine.scheduler || 'simple') }
+    : mapSampler(samplerName);
   const finalSeed = seed >= 0 ? seed : randomInt(1, 2 ** 31 - 1);
+  const loras = Array.isArray(engine?.loras) ? engine.loras.filter((l) => l && l.name) : [];
+  // 触发词：引擎配了 triggerWords 且提示词里没出现第一个触发词时，自动补到最前面。
+  const triggers = String(engine?.triggerWords || '').trim();
+  const firstTrigger = triggers ? triggers.split(',')[0].trim().toLowerCase() : '';
+  const hasTrigger = firstTrigger ? String(prompt).toLowerCase().includes(firstTrigger) : true;
+  const finalPrompt = triggers && !hasTrigger ? `${triggers}, ${prompt}` : prompt;
   const workflow = useQwen
     ? buildQwenWorkflow({
       unet: engine.unet,
@@ -171,19 +252,36 @@ export async function comfyGenerate({ cfg, engine, prompt, negativePrompt, width
       samplerName: mapped.samplerName,
       scheduler: mapped.scheduler
     })
-    : buildWorkflow({
-      checkpoint: engine?.checkpoint || cfg.checkpoint,
-      prompt,
-      negativePrompt,
-      width,
-      height,
-      steps,
-      cfgScale,
-      seed: finalSeed,
-      samplerName: mapped.samplerName,
-      scheduler: cfg.scheduler || mapped.scheduler
-    });
-  const outputNode = useQwen ? '9' : '7';
+    : useAnima
+      ? buildAnimaWorkflow({
+        unet: engine.unet,
+        clip: engine.clip,
+        vae: engine.vae,
+        prompt: finalPrompt,
+        negativePrompt,
+        width,
+        height,
+        steps,
+        cfgScale,
+        seed: finalSeed,
+        samplerName: mapped.samplerName,
+        scheduler: mapped.scheduler,
+        loras
+      })
+      : buildWorkflow({
+        checkpoint: engine?.checkpoint || cfg.checkpoint,
+        prompt: finalPrompt,
+        negativePrompt,
+        width,
+        height,
+        steps,
+        cfgScale,
+        seed: finalSeed,
+        samplerName: mapped.samplerName,
+        scheduler: cfg.scheduler || mapped.scheduler,
+        loras
+      });
+  const outputNode = useQwen ? '9' : useAnima ? '9' : '7';
 
   const started = Date.now();
   let promptId;
@@ -253,8 +351,10 @@ export async function comfyGenerate({ cfg, engine, prompt, negativePrompt, width
     width,
     height,
     seed: finalSeed,
-    model: useQwen ? (engine.unet || 'qwen-image') : (engine?.checkpoint || cfg.checkpoint),
-    engine: engine?.id || (useQwen ? 'qwen' : 'sdxl'),
+    model: useQwen || useAnima ? (engine.unet || 'qwen-image') : (engine?.checkpoint || cfg.checkpoint),
+    engine: engine?.id || (useQwen ? 'qwen' : useAnima ? 'anima' : 'sdxl'),
+    prompt: finalPrompt,
+    loras,
     samplerName: mapped.samplerName,
     scheduler: mapped.scheduler,
     elapsedMs: Date.now() - started

@@ -466,7 +466,7 @@ dsmp/settings.json   插件设置（导入后 memoryDir / liveCwd 改新路径�
 - `/api/socialV2/send-voice`（语音库文件）只回报音频，没有原文就留空；面板那条显示灰字「（没有原文）」，以后可补。
 - 主人发来的语音仍走 `/api/dsmp/voice/inbound`，标 `direction:'in'`、`speaker:'owner'`，只听、不转写。
 
-`state/voice.jsonl` 每行新增 `direction`（`in`/`out`）、`speaker`（`owner`/`shenming`）、`text`、`textSource`（`tts-input`/`stt`/`library-meta`/`manual`）。旧行没有这些字段，按 `direction:'in'` 兼容。同一段音频按 sha1 只存一份；后到的空文本不会冲掉已有原文，只有 `manual` 能人工覆盖。
+`state/voice.jsonl` 每行新增 `direction`（`in`/`out`）、`speaker`（`owner`/`persona`）、`text`、`textSource`（`tts-input`/`stt`/`library-meta`/`manual`）。旧行没有这些字段，按 `direction:'in'` 兼容。同一段音频按 sha1 只存一份；后到的空文本不会冲掉已有原文，只有 `manual` 能人工覆盖。
 
 面板「记忆 → 语音库」分两组：「她说过的」（原文 / 「（识别）」 / 「（没有原文）」+「发这条」）和「主人发来的」（只听）。
 

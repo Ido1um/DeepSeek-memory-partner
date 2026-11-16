@@ -15,12 +15,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root        = Split-Path -Parent $PSScriptRoot
-$backupRoot  = '<BACKUP_ROOT>\dsmp-memory'
+$backupRoot  = '<BACKUP_ROOT>\DeepSeek work\dsmp-memory'
 $dshHome     = if ($env:DSH_HOME) { $env:DSH_HOME } else { '<DSH_HOME>' }
-$shenmingDir = '<DSMP_MEMORY_DIR>'
+$personaDir = '<DSMP_MEMORY_DIR>'
 try {
   $bridgeConfig = Get-Content -LiteralPath (Join-Path $root 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-  if ($bridgeConfig.memory -and $bridgeConfig.memory.dir) { $shenmingDir = [string]$bridgeConfig.memory.dir }
+  if ($bridgeConfig.memory -and $bridgeConfig.memory.dir) { $personaDir = [string]$bridgeConfig.memory.dir }
 } catch { }
 # 记忆面板插件（含记忆引擎源码 vendor\memory）：源码很关键、体积小；node_modules/backup/logs 必须排除
 $memoryPartnerDir = '<DSMP_PLUGIN_ROOT>'
@@ -33,7 +33,7 @@ $script:prevPayload = ''
 $script:payloadRoot = ''
 $nodeExe = '<DSH_HOME>\app\resources\runtime\primary-runtime\dependencies\node\bin\node.exe'
 if (-not (Test-Path -LiteralPath $nodeExe)) { $nodeExe = 'node' }
-$incTool = '<BACKUP_ROOT>\_tools\incremental-copy.mjs'
+$incTool = '<BACKUP_ROOT>\DeepSeek work\备份工具\incremental-copy.mjs'
 
 function Write-Log([string]$message) {
   $line = '{0} [{1}] {2}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Mode, $message
@@ -246,7 +246,7 @@ function New-Snapshot {
     Invoke-PayloadCopy (Join-Path $dshHome 'attachments') (Join-Path $payload 'dsh-attachments')
 
     Write-Log 'copying dsmp-memory logs'
-    Invoke-PayloadCopy $shenmingDir (Join-Path $payload 'shenming')
+    Invoke-PayloadCopy $personaDir (Join-Path $payload 'persona')
 
     Write-Log 'copying memory partner plugin code'
     if (Test-Path -LiteralPath $memoryPartnerDir) {
@@ -295,7 +295,7 @@ function New-Snapshot {
         (Join-Path $dshHome 'sessions') + '（映射会话所在工作区）',
         (Join-Path $dshHome 'memories'),
         (Join-Path $dshHome 'attachments') + '（聊天图片附件）',
-        $shenmingDir,
+        $personaDir,
         (Join-Path $root 'state\sessions.json'),
         (Join-Path $root 'state\social-v2.json') + ' 等状态文件',
         (Join-Path $root 'roles'),
@@ -318,7 +318,7 @@ function New-Snapshot {
               "  payload\dsh-sessions\    QQ 机器人的 DSH 会话（聊天历史）`r`n" +
               "  payload\dsh-memories\    DSH 长期记忆 MEMORY/KEY/项目记忆`r`n" +
               "  payload\dsh-attachments\ DSH 聊天图片附件（面板/记录里的图片）`r`n" +
-              "  payload\shenming\        7 天记忆日志/摘要/状态`r`n" +
+              "  payload\persona\        7 天记忆日志/摘要/状态`r`n" +
               "  payload\qq-bridge\       sessions.json、roles、config.json`r`n" +
               "  payload\memory-partner\  记忆面板插件 + vendor 记忆引擎源码（无 node_modules、backup、logs）`r`n`r`n" +
               "恢复: 查看同目录的 RESTORE.md 或 E 盘根目录 RESTORE.md。`r`n" +

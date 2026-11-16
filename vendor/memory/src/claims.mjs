@@ -278,9 +278,9 @@ export function confirmClaim(dir = '', id = '', patch = {}) {
   const old = active.find((f) => f.status === 'active' && f.topicId === topicId && f.slot === slot && (!program || !f.program || f.program === program));
   if (old) {
     lt.appendEvent({
-      ev: 'supersede',
-      id: old.id,
       ...base,
+      id: old.id,
+      ev: 'supersede',
       sig,
       revision: (Number(old.versions) || 1) + 1,
       by: 'correction'
